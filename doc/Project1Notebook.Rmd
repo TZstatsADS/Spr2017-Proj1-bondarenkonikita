@@ -1,0 +1,189 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Interesting trends, patterns on all inaugural presidential speeches 
+
+Explore texts using tools from text mining and natural language processing such as sentiment analysis, topic modeling
+
+Data:
+59 inaugural speeches
+
+[Repo](https://github.com/TZstatsADS/Spr2017-Proj1-bondarenkonikita).
+
+
+
+The current political landscape in the United States is very divided as evidenced by the most recent controversial election which featured the two most disliked candidates ever. In this project, I investigated if the leaders of both parties send differing rhetorical messages to their bases. Specifically, I was interested in analyzing some of the differences between the modern version of the Republican and Democratic parties as evidenced by the inaugural speeches of the candidates that represented them. Sometime between the 1860s and 1936, the Democratic party started to embrace and advocate for big government and the Republican party became committed to a small government. 
+
+Based on these dates I decided to focus on the inaugural speeches beginning with Franklin D. Roosevelt's first one which was given in 1933. Using the ShinyApp provided, I analyzed the various word clouds of presidents beginning with FDR. However, I found that the word clouds generated had a small sample size because the speeches were not very long. I checked some of the speeches and there were cases where a world that appeared in the word cloud only appeared once in the speech so I concluded that the sample size was too small. In order to address this challenge I decided to combine the speeches for each party over the past 84 year period to see if I can find regularities with a larger sample size.
+
+My ambitious goal was to come up with a machine learning algorithm which could tell if a speech was given by a Republican or Democrat based on the frequency of certain words. To do this, I would need to find key words that signal whether a speech is more likely given by a president from one party or the other. I hoped I would be able to find these identifying words.
+
+
+I began by creating vectors with the names of the presidents and their terms from 1933 until now.
+
+```{r}
+packages.used=c("tm", "wordcloud", "RColorBrewer", 
+                "dplyr", "tidytext","data.table")
+
+# check packages that need to be installed.
+packages.needed=setdiff(packages.used, 
+                        intersect(installed.packages()[,1], 
+                                  packages.used))
+# install additional packages
+if(length(packages.needed)>0){
+  install.packages(packages.needed, dependencies = TRUE,
+                   repos='http://cran.us.r-project.org')
+}
+
+library(tm)
+library(wordcloud)
+library(RColorBrewer)
+library(dplyr)
+library(tidytext)
+library(data.table)
+
+# create two lists of Democratic and Republican speeches since 1933, as well as combined list
+DemNames <- c("BarackObama-1", "BarackObama-2", "FranklinDRoosevelt-1", "FranklinDRoosevelt-2", "FranklinDRoosevelt-3", "FranklinDRoosevelt-4","HarrySTruman-1", "JimmyCarter-1", "JohnFKennedy-1", "LyndonBJohnson-1", "WilliamJClinton-1", "WilliamJClinton-2")
+RepNames <- c("DonaldJTrump-1", "DwightDEisenhower-1", "DwightDEisenhower-2", "GeorgeBush-1", "GeorgeWBush-1", "GeorgeWBush-2", "RichardNixon-1", "RichardNixon-2", "RonaldReagan-1", "RonaldReagan-2")
+AllNames <- c(DemNames,RepNames)
+```
+
+
+Next I use text mining in order to figure out the most common words for both parties
+
+```{r}
+
+# read in the speeches
+folder.path <- "../data/InauguralSpeeches"
+speeches <- list.files(path = folder.path, pattern = "*.txt")
+prex.out <- substr(speeches, 6, nchar(speeches)-4)
+ff <- Corpus(DirSource(folder.path))
+
+# clean up speeches
+ff <- tm_map(ff, stripWhitespace)
+ff <- tm_map(ff, content_transformer(tolower))
+ff <- tm_map(ff, removeWords, stopwords("english"))
+ff <- tm_map(ff, removeWords, character(0))
+ff <- tm_map(ff, removePunctuation)
+tdm.tidy <- tidy(TermDocumentMatrix(ff))
+
+# create subsets of tdm.tidy for Democratic, Republican, and Both
+ix <- which(tdm.tidy$document %in% paste0('inaug',DemNames,'.txt'))
+tdm.Dem <- tdm.tidy[ix,]
+ix <- which(tdm.tidy$document %in% paste0('inaug',RepNames,'.txt'))
+tdm.Rep <- tdm.tidy[ix,]
+tdm.All <- bind_rows(tdm.Dem,tdm.Rep)
+
+```
+
+Below I find the 100 most common words for Democrats and, for readibility, plot only the top 20.
+```{r}
+N <- 100
+Nd <- 20
+
+tdm.sum.Dem <- summarise(group_by(tdm.Dem, term), sum(count))
+topN <- data.table(tdm.sum.Dem)
+topN <- topN[order(topN$`sum(count)`,decreasing=TRUE),]
+topN <- topN[, head(.SD, Nd)]
+
+topN
+W <- topN$term
+WFreq = topN$`sum(count)`
+par(las=2)
+barplot(height = WFreq, names.arg = W)
+
+```
+
+
+Below I find the most common words for Republicans and plot the top 20.
+```{r}
+tdm.sum.Rep <- summarise(group_by(tdm.Rep, term), sum(count))
+topN <- data.table(tdm.sum.Rep)
+topN <- topN[order(topN$`sum(count)`,decreasing=TRUE),]
+topN <- topN[, head(.SD, Nd)]
+topN
+
+W <- topN$term
+WFreq = topN$`sum(count)`
+par(las=2)
+barplot(height = WFreq, names.arg = W)
+
+```
+
+
+
+Finally, I find the most common words for both parties and plot the top 20.
+```{r}
+tdm.sum.All <- summarise(group_by(tdm.All, term), sum(count))
+topN <- data.table(tdm.sum.All)
+topN <- topN[order(topN$`sum(count)`,decreasing=TRUE),]
+topN.All <- topN[, head(.SD, N)]
+topN <- topN[, head(.SD, Nd)]
+topN
+
+W <- topN$term
+WFreq = topN$`sum(count)`
+par(las=2)
+barplot(height = WFreq, names.arg = W)
+
+```
+
+As seen from the bar plots, a lot of the top words for both parties overlap. If a word appears with similar frequencies for both parties, it would not be helpful in identifying what party a president is. Therefore, I compute the ratio of usage (Dem to Rep) among the top 100 most common words used by both parties. I am interested in ratios significantly different from 1. That is, I look for words which are (i) reasonably frequent (to reduce randomness), and (ii) have considerably different frequencies between the two parties. Below I plot 5 words with the highest ratio and 5 words with the lowest ratio.
+```{r}
+
+xD = match(topN.All$term,tdm.sum.Dem$term)
+xR = match(topN.All$term,tdm.sum.Rep$term)
+topN.All$Dem = tdm.sum.Dem[xD,2]
+topN.All$Rep = tdm.sum.Rep[xR,2]
+topN.All$ratio = tdm.sum.Dem[xD,2]/tdm.sum.Rep[xR,2]
+
+Ordered<- topN.All[order(topN.All$ratio,decreasing=TRUE),]
+Ordered
+
+# plot words with 5 highest and 5 lowest ratios
+Ns = 5
+ImpWords <- Ordered[c(1:Ns,(N-Ns+1):N)]
+par(las=2)
+barplot(height = ImpWords$ratio, names.arg = ImpWords$term)
+abline(a=1,b=0)
+```
+The word within the top 100 cumulative words that is relatively used the most by Democrats compared to Republicans is "democracy" (ratio = 5.429), while top relatively used word by Republicans is "heart" (ratio = .333).
+
+Next, I attempt to run a logistic regression, where frequencies of influential words predict whether a speech is by Democratic or Republican president. This is represented by a dummy variable D, equal one for a Democratic and zero for a Republican speech. Overall, there are 22 speeches (12 Democratic and 10 Republican). Because there are only 22 observations, I decided to use only 6 explanatory variables in order to avoid issues with overfitting and multicollinearity. I picked the 3 words with the higest ratios and the 3 words with the lowest ratios.
+
+
+
+
+
+```{r}
+# for each speech in list AllNames compute frequencies of 100 most common words
+# collect this data in topN.Ind
+topN.Ind = topN.All[,c(1,3:5)]
+Np = length(AllNames)
+for (i in 1:Np){
+  cP = AllNames[i]
+  iP <- which(tdm.tidy$document %in% paste0('inaug',AllNames[i],'.txt'))
+  tdm.P <- tdm.tidy[iP,]
+  xP = match(topN.All$term,tdm.P$term)
+  topN.Ind[,cP] = tdm.P[xP,3]
+}
+
+# select3 words with higest and lowest ratios and form the matrix of explanatory variables
+Ns = 3
+ImpWords <- Ordered[c(1:Ns,(N-Ns+1):N)]
+topN.Ind[is.na(topN.Ind)] <- 0
+ix <- match(ImpWords$term,topN.Ind$term)
+df = t(topN.Ind[ix,-c(1:4)])
+colnames(df)=topN.Ind$term[ix]
+# define the dummy variable D (1-Dem, 0-Rep) and estimate logistic regression
+D = c(rep(1,12),rep(0,10)) 
+logm <- glm(D~df)
+summary(logm)
+```
+
+In conclusion, the influential words that that I tested in the logistic model have coefficients with the correct signs (positive for the first 3 words and negative for the last 3 words), suggesting that they might have some predictive value. However, the coefficients are not statistically significant, as evidenced by relatively high p-values. The relation that I discovered appears to be useful, but not as strong as I had hoped to find. This is not completely surprising, as the sample size is quite small, which in turn limits the number of influential words that can be used in the model.
+
+If I have more time and data, I would like to try and test the results from the logistic regression on other speeches from presidents. In particular, I could use other speeches by US presidents, such as the State of the Union Speech (every year, as opposed to every four years), Presidential Acceptance Speech, Fairwell Speech and others. This would allow me increase sample size dramatically, to have both "training" and "out-of-sample" data, and investigate more formally if the influential words which I identified could discriminate speeches from the two parties. Overall, I found the project very interesting and thought provoking. 
+
